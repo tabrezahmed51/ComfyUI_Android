@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUser(data, userId) {
+      return data.userId == userId &&
+             data.email is string &&
+             data.displayName is string;
+    }
+
+    function isValidWorkflow(data, userId) {
+      return data.userId == userId &&
+             data.name is string &&
+             data.name.size() > 0 &&
+             data.nodesJson is string &&
+             data.linksJson is string;
+    }
+
+    function isValidGalleryItem(data, userId) {
+      return data.userId == userId &&
+             data.promptText is string &&
+             data.seed is number &&
+             data.steps is number &&
+             data.modelName is string;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUser(request.resource.data, userId);
+      allow delete: if isOwner(userId);
+
+      match /workflows/{workflowId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidWorkflow(request.resource.data, userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /gallery/{jobId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidGalleryItem(request.resource.data, userId);
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

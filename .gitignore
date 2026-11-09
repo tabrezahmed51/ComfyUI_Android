@@ -1,0 +1,27 @@
+# Built application files
+*.apk
+*.aar
+*.aab
+
+# Gradle files
+.gradle/
+build/
+app/build/
+.build-outputs/
+
+# Local configuration
+local.properties
+.env
+
+# Log files
+*.log
+*-debug.log
+
+# Android Studio & IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Memory dumps
+*.hprof

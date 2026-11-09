@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ComfyUI Mobile Firestore Schema",
+  "description": "Multi-user cloud persistence for ComfyUI Mobile workflows, prompts, and generated artwork gallery",
+  "collections": {
+    "users": {
+      "path": "users/{userId}",
+      "description": "User profile document",
+      "fields": {
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "description": "User email address" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "createdAt": { "type": "timestamp", "description": "Profile creation timestamp" },
+        "updatedAt": { "type": "timestamp", "description": "Profile last updated timestamp" }
+      },
+      "subcollections": {
+        "workflows": {
+          "path": "users/{userId}/workflows/{workflowId}",
+          "description": "Custom workflows created or saved by the user",
+          "fields": {
+            "userId": { "type": "string", "description": "Owner user UID" },
+            "name": { "type": "string", "description": "Workflow title" },
+            "description": { "type": "string", "description": "Workflow description" },
+            "nodesJson": { "type": "string", "description": "Serialized ComfyUI nodes JSON" },
+            "linksJson": { "type": "string", "description": "Serialized ComfyUI links JSON" },
+            "createdAt": { "type": "timestamp", "description": "Created server timestamp" },
+            "updatedAt": { "type": "timestamp", "description": "Updated server timestamp" }
+          }
+        },
+        "gallery": {
+          "path": "users/{userId}/gallery/{jobId}",
+          "description": "Generated diffusion artworks with generation parameters",
+          "fields": {
+            "userId": { "type": "string", "description": "Owner user UID" },
+            "promptText": { "type": "string", "description": "Positive CLIP prompt" },
+            "negativePromptText": { "type": "string", "description": "Negative CLIP prompt" },
+            "seed": { "type": "number", "description": "Random seed used for generation" },
+            "steps": { "type": "number", "description": "Inference denoising steps" },
+            "cfg": { "type": "number", "description": "Classifier-free guidance scale" },
+            "samplerName": { "type": "string", "description": "Sampler algorithm name" },
+            "modelName": { "type": "string", "description": "Diffusion model checkpoint" },
+            "width": { "type": "number", "description": "Image width in pixels" },
+            "height": { "type": "number", "description": "Image height in pixels" },
+            "durationSeconds": { "type": "number", "description": "Generation execution duration in seconds" },
+            "imageUrl": { "type": "string", "description": "Local or cloud storage image URL" },
+            "createdAt": { "type": "timestamp", "description": "Created server timestamp" },
+            "updatedAt": { "type": "timestamp", "description": "Updated server timestamp" }
+          }
+        }
+      }
+    }
+  }
+}

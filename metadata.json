@@ -1,0 +1,8 @@
+{
+  "name": "ComfyUI Mobile",
+  "description": "Visual node-based generative AI workflow studio and ComfyUI client for Android",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
