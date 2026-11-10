@@ -12,8 +12,10 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.comfyui.ui.screens.*
 import com.example.comfyui.ui.theme.*
@@ -24,7 +26,8 @@ enum class ComfyScreen(val title: String, val icon: ImageVector) {
     BLUEPRINTS("Blueprints", Icons.Default.AccountTree),
     QUEUE("Queue", Icons.Default.HourglassTop),
     GALLERY("Gallery", Icons.Default.PhotoLibrary),
-    MODELS("Models", Icons.Default.Memory)
+    MODELS("Models", Icons.Default.Memory),
+    SETTINGS("Settings", Icons.Default.Settings)
 }
 
 class MainActivity : ComponentActivity() {
@@ -36,7 +39,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            ComfyUITheme {
+            val themeMode by viewModel.themeMode.collectAsState()
+            val useDynamicColor by viewModel.useDynamicColor.collectAsState()
+
+            ComfyUITheme(themeMode = themeMode, useDynamicColor = useDynamicColor) {
                 var currentScreen by remember { mutableStateOf(ComfyScreen.STUDIO) }
                 val queue by viewModel.queue.collectAsState()
                 val activeJob by viewModel.activeJob.collectAsState()
@@ -48,11 +54,11 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
-                    containerColor = BackgroundDark,
+                    containerColor = MaterialTheme.colorScheme.background,
                     contentWindowInsets = WindowInsets.safeDrawing,
                     bottomBar = {
                         NavigationBar(
-                            containerColor = SurfaceDark,
+                            containerColor = MaterialTheme.colorScheme.surface,
                             tonalElevation = 8.dp,
                             modifier = Modifier.testTag("comfy_bottom_navigation")
                         ) {
@@ -67,8 +73,9 @@ class MainActivity : ComponentActivity() {
                                         BadgedBox(
                                             badge = {
                                                 if (hasQueueBadge) {
+                                                    val totalActive = (if (activeJob != null) 1 else 0) + queue.size
                                                     Badge(containerColor = PrimaryNeon) {
-                                                        Text("${if (activeJob != null) 1 else 0 + queue.size}")
+                                                        Text("$totalActive", color = Color(0xFF00354E), fontWeight = FontWeight.Bold)
                                                     }
                                                 }
                                             }
@@ -95,7 +102,10 @@ class MainActivity : ComponentActivity() {
                 ) { innerPadding ->
                     Box(modifier = Modifier.padding(innerPadding)) {
                         when (currentScreen) {
-                            ComfyScreen.STUDIO -> StudioScreen(viewModel = viewModel)
+                            ComfyScreen.STUDIO -> StudioScreen(
+                                viewModel = viewModel,
+                                onNavigateToSettings = { currentScreen = ComfyScreen.SETTINGS }
+                            )
                             ComfyScreen.BLUEPRINTS -> BlueprintsScreen(
                                 viewModel = viewModel,
                                 onNavigateToStudio = { currentScreen = ComfyScreen.STUDIO }
@@ -105,7 +115,14 @@ class MainActivity : ComponentActivity() {
                                 viewModel = viewModel,
                                 onNavigateToStudio = { currentScreen = ComfyScreen.STUDIO }
                             )
-                            ComfyScreen.MODELS -> ModelsScreen(viewModel = viewModel)
+                            ComfyScreen.MODELS -> ModelsScreen(
+                                viewModel = viewModel,
+                                onNavigateToSettings = { currentScreen = ComfyScreen.SETTINGS }
+                            )
+                            ComfyScreen.SETTINGS -> SettingsScreen(
+                                viewModel = viewModel,
+                                onNavigateBack = { currentScreen = ComfyScreen.STUDIO }
+                            )
                         }
                     }
                 }

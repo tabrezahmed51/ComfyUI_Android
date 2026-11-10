@@ -10,9 +10,14 @@ import com.example.comfyui.R
 import com.example.comfyui.data.model.GenerationJob
 import com.example.comfyui.data.model.JobStatus
 import com.example.comfyui.data.model.Workflow
+import com.example.comfyui.data.network.ComfyRetrofitClient
+import com.example.comfyui.data.repository.WorkflowRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
@@ -22,6 +27,7 @@ class WorkflowEngine(private val context: Context) {
 
     suspend fun executeWorkflow(
         workflow: Workflow,
+        isRemote: Boolean = false,
         onProgressUpdate: (GenerationJob) -> Unit
     ): GenerationJob {
         val positivePromptNode = workflow.nodes.find {
@@ -76,7 +82,33 @@ class WorkflowEngine(private val context: Context) {
             workflowSnapshot = workflow
         )
         onProgressUpdate(job)
-        delay(250)
+        delay(200)
+
+        if (isRemote) {
+            job = job.copy(
+                currentNodeTitle = "Transmitting to ComfyUI Server via Retrofit...",
+                progress = 0.08f
+            )
+            onProgressUpdate(job)
+            try {
+                val apiJson = WorkflowRepository.exportToWorkflowApiJson(workflow)
+                val rootJson = JSONObject().apply {
+                    put("client_id", "comfy_client_${UUID.randomUUID().toString().take(6)}")
+                    put("prompt", JSONObject(apiJson))
+                }
+                val body = rootJson.toString().toRequestBody("application/json".toMediaType())
+                val resp = ComfyRetrofitClient.apiService.queuePrompt(body)
+                if (resp.isSuccessful && resp.body()?.promptId != null) {
+                    val pid = resp.body()!!.promptId!!
+                    job = job.copy(
+                        currentNodeTitle = "Remote Prompt Submitted (ID: ${pid.take(8)})",
+                        progress = 0.12f
+                    )
+                    onProgressUpdate(job)
+                }
+            } catch (_: Exception) {}
+            delay(200)
+        }
 
         // Stage 1: Load Model
         job = job.copy(
@@ -150,15 +182,16 @@ class WorkflowEngine(private val context: Context) {
         return try {
             val filename = "gen_${jobId}.jpg"
             val file = File(context.filesDir, filename)
+            val cacheFile = File(context.cacheDir, filename)
 
             // If prompt mentions fox or animal, use cyber fox; otherwise cyberpunk city
             val isFox = prompt.contains("fox", ignoreCase = true) || prompt.contains("animal", ignoreCase = true)
             val resId = if (isFox) R.drawable.sample_cyber_fox else R.drawable.sample_cyberpunk
 
             context.resources.openRawResource(resId).use { input ->
-                FileOutputStream(file).use { output ->
-                    input.copyTo(output)
-                }
+                val bytes = input.readBytes()
+                FileOutputStream(file).use { it.write(bytes) }
+                FileOutputStream(cacheFile).use { it.write(bytes) }
             }
             file.absolutePath
         } catch (e: Exception) {
@@ -196,7 +229,11 @@ class WorkflowEngine(private val context: Context) {
         canvas.drawText("ComfyUI Output: Seed $seed", 32f, 80f, textPaint)
 
         val file = File(context.filesDir, "gen_${jobId}.jpg")
+        val cacheFile = File(context.cacheDir, "gen_${jobId}.jpg")
         FileOutputStream(file).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        }
+        FileOutputStream(cacheFile).use { out ->
             bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
         }
         return file.absolutePath

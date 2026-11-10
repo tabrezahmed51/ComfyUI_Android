@@ -9,23 +9,63 @@ import com.example.comfyui.data.firebase.FirebaseRepository
 import com.example.comfyui.data.firebase.FirestoreWorkflow
 import com.example.comfyui.data.model.*
 import com.example.comfyui.data.repository.WorkflowRepository
+import com.example.comfyui.ui.theme.ThemeMode
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import android.content.Context
+import com.example.comfyui.data.network.ComfyRetrofitClient
+import com.example.comfyui.data.network.model.DeviceInfo
+import com.example.comfyui.data.network.model.SystemInfo
+import com.example.comfyui.data.network.model.SystemStatsResponse
 import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.random.Random
 
 enum class ServerMode {
     MOBILE_EMULATION,
     REMOTE_COMFY_SERVER
 }
+
+data class ServerHealth(
+    val isOnline: Boolean = false,
+    val isChecking: Boolean = false,
+    val statusCode: Int? = null,
+    val statusMessage: String = "Not Checked",
+    val latencyMs: Long? = null,
+    val lastCheckedTime: Long = 0L,
+    val systemInfo: SystemInfo? = null,
+    val deviceName: String? = null,
+    val vramStats: String? = null
+)
+
+data class LocalCacheImage(
+    val file: File,
+    val name: String,
+    val sizeBytes: Long,
+    val lastModified: Long,
+    val isFromCacheDir: Boolean
+)
+
+data class LocalWorkflowFile(
+    val file: File,
+    val name: String,
+    val sizeBytes: Long,
+    val lastModified: Long,
+    val nodeCount: Int
+)
 
 class ComfyViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -55,19 +95,56 @@ class ComfyViewModel(application: Application) : AndroidViewModel(application) {
     private val _history = MutableStateFlow<List<GenerationJob>>(emptyList())
     val history: StateFlow<List<GenerationJob>> = _history.asStateFlow()
 
+    private val prefs by lazy {
+        getApplication<Application>().getSharedPreferences("comfy_settings", Context.MODE_PRIVATE)
+    }
+
     private val _serverMode = MutableStateFlow(ServerMode.MOBILE_EMULATION)
     val serverMode: StateFlow<ServerMode> = _serverMode.asStateFlow()
 
-    private val _serverUrl = MutableStateFlow("http://127.0.0.1:8188")
+    private val _serverUrl = MutableStateFlow(
+        prefs.getString("server_url", null) ?: ComfyRetrofitClient.currentBaseUrl.trimEnd('/')
+    )
     val serverUrl: StateFlow<String> = _serverUrl.asStateFlow()
 
     private val _serverApiKey = MutableStateFlow(
-        if (com.example.comfyui.BuildConfig.COMFY_UI_SERVER_KEY != "none") com.example.comfyui.BuildConfig.COMFY_UI_SERVER_KEY else ""
+        prefs.getString("server_api_key", null) ?: ComfyRetrofitClient.currentApiKey
     )
     val serverApiKey: StateFlow<String> = _serverApiKey.asStateFlow()
 
     private val _isServerConnected = MutableStateFlow(false)
     val isServerConnected: StateFlow<Boolean> = _isServerConnected.asStateFlow()
+
+    private val _serverHealth = MutableStateFlow(ServerHealth())
+    val serverHealth: StateFlow<ServerHealth> = _serverHealth.asStateFlow()
+
+    private val _themeMode = MutableStateFlow(
+        runCatching {
+            ThemeMode.valueOf(prefs.getString("theme_mode", ThemeMode.SYSTEM.name) ?: ThemeMode.SYSTEM.name)
+        }.getOrDefault(ThemeMode.SYSTEM)
+    )
+    val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+
+    private val _useDynamicColor = MutableStateFlow(
+        prefs.getBoolean("use_dynamic_color", true)
+    )
+    val useDynamicColor: StateFlow<Boolean> = _useDynamicColor.asStateFlow()
+
+    fun setThemeMode(mode: ThemeMode) {
+        _themeMode.value = mode
+        prefs.edit().putString("theme_mode", mode.name).apply()
+    }
+
+    fun setDynamicColor(enabled: Boolean) {
+        _useDynamicColor.value = enabled
+        prefs.edit().putBoolean("use_dynamic_color", enabled).apply()
+    }
+
+    private val _localCacheImages = MutableStateFlow<List<LocalCacheImage>>(emptyList())
+    val localCacheImages: StateFlow<List<LocalCacheImage>> = _localCacheImages.asStateFlow()
+
+    private val _localWorkflowFiles = MutableStateFlow<List<LocalWorkflowFile>>(emptyList())
+    val localWorkflowFiles: StateFlow<List<LocalWorkflowFile>> = _localWorkflowFiles.asStateFlow()
 
     private val firebaseRepo = FirebaseRepository.create(application.applicationContext)
 
@@ -80,7 +157,14 @@ class ComfyViewModel(application: Application) : AndroidViewModel(application) {
     private var executionJob: Job? = null
 
     init {
+        // Sync Retrofit client with initial/persisted settings
+        ComfyRetrofitClient.updateBaseUrl(_serverUrl.value)
+        ComfyRetrofitClient.updateApiKey(_serverApiKey.value)
         seedInitialHistory()
+        seedInitialCacheAndWorkflows()
+        refreshLocalCacheImages()
+        loadLocalWorkflowFiles()
+        checkServerHealth()
         try {
             Firebase.auth.addAuthStateListener { auth ->
                 _currentUser.value = auth.currentUser
@@ -183,6 +267,20 @@ class ComfyViewModel(application: Application) : AndroidViewModel(application) {
         _currentWorkflow.value = blueprint.workflowFactory()
         _selectedNodeId.value = null
         resetCanvasTransform()
+    }
+
+    fun setWorkflow(workflow: Workflow) {
+        _currentWorkflow.value = workflow
+        _selectedNodeId.value = null
+        resetCanvasTransform()
+    }
+
+    fun centerCanvasOnNode(nodeId: Int) {
+        val node = _currentWorkflow.value.nodes.find { it.id == nodeId } ?: return
+        _selectedNodeId.value = nodeId
+        _canvasScale.value = 1.0f
+        _canvasOffsetX.value = -node.positionX + 100f
+        _canvasOffsetY.value = -node.positionY + 200f
     }
 
     fun updateWidgetValue(nodeId: Int, key: String, value: String) {
@@ -368,7 +466,8 @@ class ComfyViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun runWorkflow(workflow: Workflow) {
         executionJob = viewModelScope.launch {
             try {
-                val completedJob = engine.executeWorkflow(workflow) { inProgressJob ->
+                val isRemote = _serverMode.value == ServerMode.REMOTE_COMFY_SERVER
+                val completedJob = engine.executeWorkflow(workflow, isRemote = isRemote) { inProgressJob ->
                     _activeJob.value = inProgressJob
                 }
                 _history.update { listOf(completedJob) + it }
@@ -419,24 +518,397 @@ class ComfyViewModel(application: Application) : AndroidViewModel(application) {
         _queue.value = emptyList()
     }
 
+    fun removeFromQueue(jobId: String) {
+        _queue.update { it.filterNot { job -> job.id == jobId } }
+    }
+
+    fun reRunJob(job: GenerationJob) {
+        job.workflowSnapshot?.let { snapshot ->
+            _currentWorkflow.value = snapshot
+            queuePrompt()
+        }
+    }
+
+    fun queueWorkflowFiles(files: List<File>) {
+        viewModelScope.launch {
+            for (file in files) {
+                try {
+                    val content = file.readText()
+                    val workflow = WorkflowRepository.importFromJson(content, fallbackName = file.nameWithoutExtension)
+                    if (workflow != null) {
+                        val promptText = workflow.nodes.find { it.type == "CLIPTextEncode" }?.widgetValues?.get("text")
+                            ?: "Batch: ${file.nameWithoutExtension}"
+                        val queuedJob = GenerationJob(
+                            id = "batch_${System.currentTimeMillis()}_${file.nameWithoutExtension}",
+                            workflowName = workflow.name.ifBlank { file.nameWithoutExtension },
+                            promptText = promptText,
+                            negativePromptText = "",
+                            seed = Random.nextLong(100000000, 9999999999),
+                            steps = 20,
+                            cfg = 7.0f,
+                            samplerName = "euler",
+                            modelName = "v1-5-pruned-emaonly.safetensors",
+                            width = 512,
+                            height = 512,
+                            status = JobStatus.QUEUED,
+                            workflowSnapshot = workflow
+                        )
+                        if (_activeJob.value == null && _queue.value.isEmpty()) {
+                            runWorkflow(workflow)
+                        } else {
+                            _queue.update { it + queuedJob }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("ComfyVM", "Error batch queueing file ${file.name}", e)
+                }
+            }
+        }
+    }
+
+    fun zoomIn() {
+        _canvasScale.value = (_canvasScale.value * 1.15f).coerceAtMost(2.5f)
+    }
+
+    fun zoomOut() {
+        _canvasScale.value = (_canvasScale.value / 1.15f).coerceAtLeast(0.4f)
+    }
+
     fun setServerMode(mode: ServerMode) {
         _serverMode.value = mode
     }
 
     fun setServerUrl(url: String) {
-        _serverUrl.value = url
+        val clean = url.trim()
+        _serverUrl.value = clean
+        ComfyRetrofitClient.updateBaseUrl(clean)
+        prefs.edit().putString("server_url", clean).apply()
     }
 
     fun setServerApiKey(key: String) {
-        _serverApiKey.value = key.trim()
+        val clean = key.trim()
+        _serverApiKey.value = clean
+        ComfyRetrofitClient.updateApiKey(clean)
+        prefs.edit().putString("server_api_key", clean).apply()
+    }
+
+    fun updateServerSettings(url: String, key: String) {
+        setServerUrl(url)
+        setServerApiKey(key)
+        checkServerHealth()
+    }
+
+    fun resetServerSettingsToDefault() {
+        ComfyRetrofitClient.resetToEnvDefaults()
+        val defaultUrl = ComfyRetrofitClient.currentBaseUrl.trimEnd('/')
+        val defaultKey = ComfyRetrofitClient.currentApiKey
+        _serverUrl.value = defaultUrl
+        _serverApiKey.value = defaultKey
+        prefs.edit().remove("server_url").remove("server_api_key").apply()
+        checkServerHealth()
     }
 
     fun checkServerConnection() {
+        checkServerHealth()
+    }
+
+    fun checkServerHealth() {
         viewModelScope.launch {
-            // Emulate or probe connection
-            _isServerConnected.value = false
-            kotlinx.coroutines.delay(400)
-            _isServerConnected.value = true
+            _serverHealth.value = _serverHealth.value.copy(
+                isChecking = true,
+                statusMessage = "Connecting via Retrofit..."
+            )
+
+            if (_serverMode.value == ServerMode.MOBILE_EMULATION) {
+                delay(250)
+                val health = ServerHealth(
+                    isOnline = true,
+                    isChecking = false,
+                    statusCode = 200,
+                    statusMessage = "Mobile Standalone Engine Ready",
+                    latencyMs = 12L,
+                    lastCheckedTime = System.currentTimeMillis()
+                )
+                _serverHealth.value = health
+                _isServerConnected.value = true
+                return@launch
+            }
+
+            withContext(Dispatchers.IO) {
+                val startTime = System.currentTimeMillis()
+                // Update Retrofit client with active URL and API key
+                ComfyRetrofitClient.updateBaseUrl(_serverUrl.value)
+                ComfyRetrofitClient.updateApiKey(_serverApiKey.value)
+
+                try {
+                    // Call ComfyUI /system_stats endpoint via Retrofit
+                    val response = ComfyRetrofitClient.apiService.getSystemStats()
+                    val latency = System.currentTimeMillis() - startTime
+                    val code = response.code()
+
+                    if (response.isSuccessful && response.body() != null) {
+                        val stats = response.body()!!
+                        val sys = stats.system
+                        val dev = stats.devices?.firstOrNull()
+                        val vramStr = if (dev?.vramTotal != null && dev.vramFree != null) {
+                            val freeGb = String.format("%.1f", dev.vramFree.toDouble() / (1024 * 1024 * 1024))
+                            val totalGb = String.format("%.1f", dev.vramTotal.toDouble() / (1024 * 1024 * 1024))
+                            "$freeGb / $totalGb GB Free"
+                        } else null
+
+                        _serverHealth.value = ServerHealth(
+                            isOnline = true,
+                            isChecking = false,
+                            statusCode = code,
+                            statusMessage = "HTTP 200 (ComfyUI PyTorch ${sys?.pytorchVersion ?: "Ready"})",
+                            latencyMs = latency,
+                            lastCheckedTime = System.currentTimeMillis(),
+                            systemInfo = sys,
+                            deviceName = dev?.name ?: "ComfyUI Hardware",
+                            vramStats = vramStr
+                        )
+                        _isServerConnected.value = true
+                    } else {
+                        // Even if 401/403/404, server is online and reached via Retrofit
+                        val isAlive = code in 200..499
+                        _serverHealth.value = ServerHealth(
+                            isOnline = isAlive,
+                            isChecking = false,
+                            statusCode = code,
+                            statusMessage = "HTTP $code (${response.message().ifBlank { "Responding" }})",
+                            latencyMs = latency,
+                            lastCheckedTime = System.currentTimeMillis()
+                        )
+                        _isServerConnected.value = isAlive
+                    }
+                } catch (e: Exception) {
+                    val latency = System.currentTimeMillis() - startTime
+                    val errorMsg = e.localizedMessage ?: "Connection Refused"
+                    val cleanMsg = when {
+                        errorMsg.contains("ECONNREFUSED", true) -> "Server Offline (ECONNREFUSED)"
+                        errorMsg.contains("Failed to connect", true) -> "Failed to reach host"
+                        errorMsg.contains("timed out", true) -> "Connection Timed Out"
+                        else -> errorMsg
+                    }
+                    _serverHealth.value = ServerHealth(
+                        isOnline = false,
+                        isChecking = false,
+                        statusCode = null,
+                        statusMessage = cleanMsg,
+                        latencyMs = latency,
+                        lastCheckedTime = System.currentTimeMillis()
+                    )
+                    _isServerConnected.value = false
+                }
+            }
+        }
+    }
+
+    private fun seedInitialCacheAndWorkflows() {
+        try {
+            val context = getApplication<Application>().applicationContext
+
+            // 1. Seed initial cache image if cacheDir has no images
+            val cacheFiles = context.cacheDir.listFiles { _, name ->
+                name.endsWith(".jpg", true) || name.endsWith(".png", true)
+            }
+            if (cacheFiles.isNullOrEmpty()) {
+                val seedCacheFile = File(context.cacheDir, "cached_cyberpunk_output.jpg")
+                context.resources.openRawResource(com.example.comfyui.R.drawable.sample_cyberpunk).use { input ->
+                    FileOutputStream(seedCacheFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+
+            // 2. Seed initial workflow_api.json if workflows directory is empty
+            val workflowsDir = File(context.filesDir, "workflows")
+            if (!workflowsDir.exists()) {
+                workflowsDir.mkdirs()
+            }
+            val defaultApiFile = File(workflowsDir, "workflow_api.json")
+            if (!defaultApiFile.exists()) {
+                val sdWorkflow = WorkflowRepository.createStandardSDWorkflow()
+                val apiJson = WorkflowRepository.exportToWorkflowApiJson(sdWorkflow)
+                defaultApiFile.writeText(apiJson)
+            }
+            val fluxFile = File(workflowsDir, "flux1_dev_api.json")
+            if (!fluxFile.exists()) {
+                val fluxWorkflow = WorkflowRepository.createFluxDevWorkflow()
+                val apiJson = WorkflowRepository.exportToWorkflowApiJson(fluxWorkflow)
+                fluxFile.writeText(apiJson)
+            }
+        } catch (e: Exception) {
+            Log.e("ComfyVM", "Error seeding initial cache and workflows", e)
+        }
+    }
+
+    fun refreshLocalCacheImages() {
+        val context = getApplication<Application>().applicationContext
+        val list = mutableListOf<LocalCacheImage>()
+
+        // Scan cacheDir
+        context.cacheDir.listFiles { file ->
+            val ext = file.extension.lowercase()
+            ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp"
+        }?.forEach { file ->
+            list.add(
+                LocalCacheImage(
+                    file = file,
+                    name = file.name,
+                    sizeBytes = file.length(),
+                    lastModified = file.lastModified(),
+                    isFromCacheDir = true
+                )
+            )
+        }
+
+        // Scan filesDir for generated outputs
+        context.filesDir.listFiles { file ->
+            val ext = file.extension.lowercase()
+            (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp") && file.name.startsWith("gen_")
+        }?.forEach { file ->
+            list.add(
+                LocalCacheImage(
+                    file = file,
+                    name = file.name,
+                    sizeBytes = file.length(),
+                    lastModified = file.lastModified(),
+                    isFromCacheDir = false
+                )
+            )
+        }
+
+        _localCacheImages.value = list.sortedByDescending { it.lastModified }
+    }
+
+    fun deleteLocalImage(file: File) {
+        try {
+            if (file.exists()) {
+                file.delete()
+            }
+        } catch (e: Exception) {
+            Log.e("ComfyVM", "Error deleting image file: ${file.name}", e)
+        }
+        refreshLocalCacheImages()
+    }
+
+    fun clearLocalCache() {
+        val context = getApplication<Application>().applicationContext
+        try {
+            context.cacheDir.listFiles { file ->
+                val ext = file.extension.lowercase()
+                ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp"
+            }?.forEach { it.delete() }
+        } catch (e: Exception) {
+            Log.e("ComfyVM", "Error clearing cache directory", e)
+        }
+        refreshLocalCacheImages()
+    }
+
+    fun loadLocalWorkflowFiles() {
+        val context = getApplication<Application>().applicationContext
+        val workflowsDir = File(context.filesDir, "workflows")
+        if (!workflowsDir.exists()) {
+            workflowsDir.mkdirs()
+        }
+
+        val files = workflowsDir.listFiles { file ->
+            file.extension.equals("json", ignoreCase = true)
+        } ?: emptyArray()
+
+        val list = files.map { file ->
+            var nodeCount = 0
+            try {
+                val content = file.readText()
+                val json = JSONObject(content)
+                nodeCount = if (json.has("nodes")) {
+                    json.getJSONArray("nodes").length()
+                } else {
+                    json.length()
+                }
+            } catch (_: Exception) {}
+
+            LocalWorkflowFile(
+                file = file,
+                name = file.name,
+                sizeBytes = file.length(),
+                lastModified = file.lastModified(),
+                nodeCount = nodeCount
+            )
+        }.sortedByDescending { it.lastModified }
+
+        _localWorkflowFiles.value = list
+    }
+
+    fun saveWorkflowToFile(fileName: String, workflow: Workflow): Boolean {
+        return try {
+            val context = getApplication<Application>().applicationContext
+            val workflowsDir = File(context.filesDir, "workflows")
+            if (!workflowsDir.exists()) {
+                workflowsDir.mkdirs()
+            }
+
+            val sanitizedName = if (fileName.endsWith(".json", ignoreCase = true)) fileName else "$fileName.json"
+            val targetFile = File(workflowsDir, sanitizedName)
+
+            // Export in ComfyUI workflow_api.json format
+            val jsonContent = WorkflowRepository.exportToWorkflowApiJson(workflow)
+            targetFile.writeText(jsonContent)
+
+            loadLocalWorkflowFiles()
+            true
+        } catch (e: Exception) {
+            Log.e("ComfyVM", "Error saving workflow to file $fileName", e)
+            false
+        }
+    }
+
+    fun validateWorkflowFile(file: File): WorkflowValidationResult {
+        return try {
+            val content = file.readText()
+            WorkflowSchemaValidator.validate(content)
+        } catch (e: Exception) {
+            WorkflowValidationResult(
+                isValid = false,
+                format = WorkflowFormat.UNKNOWN,
+                totalNodes = 0,
+                detectedNodeTypes = emptySet(),
+                hasModelLoader = false,
+                hasSampler = false,
+                hasConditioning = false,
+                hasLatentOrOutput = false,
+                missingEssentialTypes = emptyList(),
+                warnings = emptyList(),
+                errorMessage = "Cannot read file: ${e.localizedMessage}"
+            )
+        }
+    }
+
+    fun loadWorkflowFromFile(file: File): Workflow? {
+        return try {
+            val content = file.readText()
+            val parsed = WorkflowRepository.importFromJson(content, fallbackName = file.nameWithoutExtension)
+            if (parsed != null) {
+                _currentWorkflow.value = parsed
+                _selectedNodeId.value = null
+                resetCanvasTransform()
+            }
+            parsed
+        } catch (e: Exception) {
+            Log.e("ComfyVM", "Error reading workflow from file ${file.name}", e)
+            null
+        }
+    }
+
+    fun deleteWorkflowFile(file: File): Boolean {
+        return try {
+            val deleted = file.delete()
+            loadLocalWorkflowFiles()
+            deleted
+        } catch (e: Exception) {
+            Log.e("ComfyVM", "Error deleting workflow file ${file.name}", e)
+            false
         }
     }
 

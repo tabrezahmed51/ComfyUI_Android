@@ -1,3 +1,6 @@
 /web/assets/** linguist-generated
 /web/** linguist-vendored
 comfy_api_nodes/apis/__init__.py linguist-generated
+gradlew text eol=lf
+*.bat text eol=crlf
+

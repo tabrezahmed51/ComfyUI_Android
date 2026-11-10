@@ -684,4 +684,229 @@ object WorkflowRepository {
 
         return root.toString(2)
     }
+
+    fun exportToWorkflowApiJson(workflow: Workflow): String {
+        val root = JSONObject()
+        for (node in workflow.nodes) {
+            val nodeObj = JSONObject()
+            val inputsObj = JSONObject()
+
+            // 1. Add scalar widget values
+            for ((key, value) in node.widgetValues) {
+                when {
+                    value.toLongOrNull() != null -> inputsObj.put(key, value.toLong())
+                    value.toDoubleOrNull() != null -> inputsObj.put(key, value.toDouble())
+                    value.equals("true", ignoreCase = true) -> inputsObj.put(key, true)
+                    value.equals("false", ignoreCase = true) -> inputsObj.put(key, false)
+                    else -> inputsObj.put(key, value)
+                }
+            }
+
+            // 2. Add connection links into inputs: ["fromNodeId", fromSocketIndex]
+            for (link in workflow.links) {
+                if (link.toNodeId == node.id) {
+                    val socketName = node.inputs.getOrNull(link.toSocketIndex)?.name
+                        ?: "input_${link.toSocketIndex}"
+                    val wireRef = JSONArray()
+                    wireRef.put(link.fromNodeId.toString())
+                    wireRef.put(link.fromSocketIndex)
+                    inputsObj.put(socketName, wireRef)
+                }
+            }
+
+            nodeObj.put("inputs", inputsObj)
+            nodeObj.put("class_type", node.type)
+
+            val metaObj = JSONObject()
+            metaObj.put("title", node.title)
+            nodeObj.put("_meta", metaObj)
+
+            root.put(node.id.toString(), nodeObj)
+        }
+        return root.toString(2)
+    }
+
+    fun importFromJson(jsonStr: String, fallbackName: String = "Imported Workflow"): Workflow? {
+        return try {
+            val root = JSONObject(jsonStr)
+
+            // Case A: ComfyUI Web Graph Export format with "nodes" array
+            if (root.has("nodes")) {
+                val nodesArray = root.getJSONArray("nodes")
+                val parsedNodes = mutableListOf<Node>()
+                for (i in 0 until nodesArray.length()) {
+                    val nObj = nodesArray.getJSONObject(i)
+                    val id = nObj.optInt("id", i + 1)
+                    val type = nObj.optString("type", "UnknownNode")
+                    val title = nObj.optString("title", type)
+                    val posArr = nObj.optJSONArray("pos")
+                    val posX = posArr?.optDouble(0, 100.0)?.toFloat() ?: (100f + i * 40f)
+                    val posY = posArr?.optDouble(1, 100.0)?.toFloat() ?: (100f + i * 40f)
+
+                    val widgetsMap = mutableMapOf<String, String>()
+                    if (nObj.has("widgets_values")) {
+                        val wObj = nObj.optJSONObject("widgets_values")
+                        if (wObj != null) {
+                            val keys = wObj.keys()
+                            while (keys.hasNext()) {
+                                val k = keys.next()
+                                widgetsMap[k] = wObj.optString(k, "")
+                            }
+                        } else {
+                            val wArr = nObj.optJSONArray("widgets_values")
+                            if (wArr != null) {
+                                for (w in 0 until wArr.length()) {
+                                    widgetsMap["param_$w"] = wArr.optString(w, "")
+                                }
+                            }
+                        }
+                    }
+
+                    val cat = when {
+                        type.contains("Loader", true) -> NodeCategory.LOADER
+                        type.contains("CLIP", true) || type.contains("Text", true) -> NodeCategory.CONDITIONING
+                        type.contains("Latent", true) || type.contains("VAE", true) -> NodeCategory.LATENT
+                        type.contains("Sampler", true) -> NodeCategory.SAMPLER
+                        type.contains("Upscale", true) -> NodeCategory.UPSCALE
+                        type.contains("Save", true) || type.contains("Preview", true) -> NodeCategory.IMAGE
+                        else -> NodeCategory.POST_PROCESS
+                    }
+
+                    parsedNodes.add(
+                        Node(
+                            id = id,
+                            type = type,
+                            title = title,
+                            category = cat,
+                            positionX = posX,
+                            positionY = posY,
+                            widgetValues = widgetsMap
+                        )
+                    )
+                }
+
+                val parsedLinks = mutableListOf<ConnectionLink>()
+                if (root.has("links")) {
+                    val linksArray = root.getJSONArray("links")
+                    for (l in 0 until linksArray.length()) {
+                        val linkItem = linksArray.getJSONArray(l)
+                        val linkId = linkItem.optInt(0, l + 1)
+                        val fromNode = linkItem.optInt(1, 0)
+                        val fromSocket = linkItem.optInt(2, 0)
+                        val toNode = linkItem.optInt(3, 0)
+                        val toSocket = linkItem.optInt(4, 0)
+                        val typeName = linkItem.optString(5, "IMAGE")
+                        val socketType = runCatching { SocketType.valueOf(typeName) }.getOrDefault(SocketType.IMAGE)
+                        parsedLinks.add(
+                            ConnectionLink(
+                                id = linkId,
+                                fromNodeId = fromNode,
+                                fromSocketIndex = fromSocket,
+                                toNodeId = toNode,
+                                toSocketIndex = toSocket,
+                                type = socketType
+                            )
+                        )
+                    }
+                }
+
+                val wfName = root.optString("name", fallbackName)
+                Workflow(
+                    id = "imported_${System.currentTimeMillis()}",
+                    name = wfName,
+                    nodes = parsedNodes,
+                    links = parsedLinks
+                )
+            } else {
+                // Case B: ComfyUI workflow_api.json prompt format (key-value map of node IDs)
+                val keys = root.keys()
+                val parsedNodes = mutableListOf<Node>()
+                val parsedLinks = mutableListOf<ConnectionLink>()
+                var linkIdCounter = 1
+                var col = 0
+                var row = 0
+
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val nodeObj = root.optJSONObject(key) ?: continue
+                    val nodeId = key.toIntOrNull() ?: (parsedNodes.size + 1)
+                    val classType = nodeObj.optString("class_type", "Node")
+                    val metaObj = nodeObj.optJSONObject("_meta")
+                    val title = metaObj?.optString("title", classType) ?: classType
+
+                    val inputsObj = nodeObj.optJSONObject("inputs")
+                    val widgetValues = mutableMapOf<String, String>()
+                    val inputSockets = mutableListOf<NodeSocket>()
+
+                    if (inputsObj != null) {
+                        val inputKeys = inputsObj.keys()
+                        var socketIdx = 0
+                        while (inputKeys.hasNext()) {
+                            val inKey = inputKeys.next()
+                            val value = inputsObj.get(inKey)
+                            if (value is JSONArray && value.length() >= 2) {
+                                // This is a link reference: ["node_id", output_slot]
+                                val fromId = value.getString(0).toIntOrNull() ?: 0
+                                val fromSlot = value.getInt(1)
+                                parsedLinks.add(
+                                    ConnectionLink(
+                                        id = linkIdCounter++,
+                                        fromNodeId = fromId,
+                                        fromSocketIndex = fromSlot,
+                                        toNodeId = nodeId,
+                                        toSocketIndex = socketIdx,
+                                        type = SocketType.IMAGE
+                                    )
+                                )
+                                inputSockets.add(NodeSocket(inKey, SocketType.IMAGE, true))
+                                socketIdx++
+                            } else {
+                                widgetValues[inKey] = value.toString()
+                            }
+                        }
+                    }
+
+                    val cat = when {
+                        classType.contains("Loader", true) -> NodeCategory.LOADER
+                        classType.contains("CLIP", true) || classType.contains("Text", true) -> NodeCategory.CONDITIONING
+                        classType.contains("Latent", true) || classType.contains("VAE", true) -> NodeCategory.LATENT
+                        classType.contains("Sampler", true) -> NodeCategory.SAMPLER
+                        classType.contains("Upscale", true) -> NodeCategory.UPSCALE
+                        classType.contains("Save", true) || classType.contains("Preview", true) -> NodeCategory.IMAGE
+                        else -> NodeCategory.POST_PROCESS
+                    }
+
+                    val posX = 80f + col * 340f
+                    val posY = 80f + row * 260f
+                    col = (col + 1) % 4
+                    if (col == 0) row++
+
+                    parsedNodes.add(
+                        Node(
+                            id = nodeId,
+                            type = classType,
+                            title = title,
+                            category = cat,
+                            positionX = posX,
+                            positionY = posY,
+                            inputs = inputSockets,
+                            outputs = listOf(NodeSocket("OUTPUT", SocketType.IMAGE, false)),
+                            widgetValues = widgetValues
+                        )
+                    )
+                }
+
+                Workflow(
+                    id = "api_wf_${System.currentTimeMillis()}",
+                    name = fallbackName,
+                    description = "Imported from ComfyUI workflow_api.json",
+                    nodes = parsedNodes,
+                    links = parsedLinks
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("WorkflowRepo", "Failed to parse workflow JSON", e)
+            null
+        }
+    }
 }

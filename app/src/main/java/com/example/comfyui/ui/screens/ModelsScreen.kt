@@ -26,6 +26,7 @@ import com.example.comfyui.data.repository.WorkflowRepository
 import com.example.comfyui.ui.auth.GoogleSignInButton
 import com.example.comfyui.ui.auth.UserAuthStatusCard
 import com.example.comfyui.ui.auth.signOutUser
+import com.example.comfyui.ui.components.ServerStatusDashboard
 import com.example.comfyui.ui.theme.*
 import com.example.comfyui.ui.viewmodel.ComfyViewModel
 import com.example.comfyui.ui.viewmodel.ServerMode
@@ -33,7 +34,8 @@ import com.example.comfyui.ui.viewmodel.ServerMode
 @Composable
 fun ModelsScreen(
     viewModel: ComfyViewModel,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToSettings: () -> Unit = {}
 ) {
     val models = remember { WorkflowRepository.getAllModels() }
     val serverMode by viewModel.serverMode.collectAsState()
@@ -45,7 +47,6 @@ fun ModelsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var showServerSettings by remember { mutableStateOf(false) }
     var showSignInDialog by remember { mutableStateOf(false) }
     var apiKeyVisible by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
@@ -81,7 +82,7 @@ fun ModelsScreen(
             }
 
             IconButton(
-                onClick = { showServerSettings = !showServerSettings },
+                onClick = onNavigateToSettings,
                 modifier = Modifier.testTag("server_settings_toggle")
             ) {
                 Icon(
@@ -102,7 +103,13 @@ fun ModelsScreen(
             modifier = Modifier.padding(bottom = 12.dp)
         )
 
-        // Server Connection Banner
+        // Live Server Status Dashboard Component with LED indicator and refresh button
+        ServerStatusDashboard(
+            viewModel = viewModel,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        // Server Connection & Endpoint Configuration
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -115,37 +122,30 @@ fun ModelsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .background(
-                                    if (serverMode == ServerMode.MOBILE_EMULATION || isConnected) AccentEmerald else AccentRose,
-                                    RoundedCornerShape(5.dp)
-                                )
+                    Text(
+                        text = "ENDPOINT & CREDENTIAL CONFIGURATION",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = PrimaryNeon
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (serverMode == ServerMode.MOBILE_EMULATION) "Standalone Mobile Engine" else "Remote Server ($serverUrl)",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 13.sp),
-                            color = Color.White
-                        )
-                    }
+                    )
 
                     TextButton(
                         onClick = {
                             if (serverMode == ServerMode.MOBILE_EMULATION) {
                                 viewModel.setServerMode(ServerMode.REMOTE_COMFY_SERVER)
-                                viewModel.checkServerConnection()
+                                viewModel.checkServerHealth()
                             } else {
                                 viewModel.setServerMode(ServerMode.MOBILE_EMULATION)
+                                viewModel.checkServerHealth()
                             }
                         }
                     ) {
                         Text(
-                            text = if (serverMode == ServerMode.MOBILE_EMULATION) "Switch to Remote" else "Switch to Mobile",
+                            text = if (serverMode == ServerMode.MOBILE_EMULATION) "Switch to Remote" else "Switch to Standalone",
                             fontSize = 11.sp,
-                            color = PrimaryNeon
+                            color = SecondaryOrange
                         )
                     }
                 }

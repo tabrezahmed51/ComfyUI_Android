@@ -31,10 +31,12 @@ import coil.compose.AsyncImage
 import com.example.comfyui.R
 import com.example.comfyui.data.model.GenerationJob
 import com.example.comfyui.data.repository.WorkflowRepository
+import com.example.comfyui.ui.components.GeneratedGallery
 import com.example.comfyui.ui.theme.*
 import com.example.comfyui.ui.viewmodel.ComfyViewModel
 import java.io.File
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryScreen(
     viewModel: ComfyViewModel,
@@ -42,6 +44,8 @@ fun GalleryScreen(
     modifier: Modifier = Modifier
 ) {
     val history by viewModel.history.collectAsState()
+    val localCacheImages by viewModel.localCacheImages.collectAsState()
+    var selectedTab by remember { mutableStateOf(0) }
     var selectedJob by remember { mutableStateOf<GenerationJob?>(null) }
     var showJsonDialog by remember { mutableStateOf(false) }
 
@@ -64,34 +68,72 @@ fun GalleryScreen(
                     color = Color.White
                 )
                 Text(
-                    text = "${history.size} Generated outputs with embedded workflow metadata",
+                    text = if (selectedTab == 0) "${history.size} Generated outputs with embedded workflow metadata" else "${localCacheImages.size} Cached & saved image files in app directory",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color.Gray
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        if (history.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("No generated images yet.", color = Color.Gray)
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 150.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+        // Tab Selector between Cloud History and Local Cache Gallery
+        PrimaryTabRow(
+            selectedTabIndex = selectedTab,
+            containerColor = SurfaceDark,
+            contentColor = PrimaryNeon,
+            divider = { HorizontalDivider(color = BorderDark) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .border(1.dp, BorderDark, RoundedCornerShape(10.dp))
+        ) {
+            Tab(
+                selected = selectedTab == 0,
+                onClick = { selectedTab = 0 },
+                text = { Text("Generation History (${history.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
+                icon = { Icon(Icons.Default.CloudQueue, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                modifier = Modifier.testTag("tab_history")
+            )
+            Tab(
+                selected = selectedTab == 1,
+                onClick = { selectedTab = 1 },
+                text = { Text("Local Cache (${localCacheImages.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
+                icon = { Icon(Icons.Default.FolderSpecial, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                modifier = Modifier.testTag("tab_local_cache")
+            )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        if (selectedTab == 1) {
+            // Local Cache Gallery using Coil with delete and share
+            GeneratedGallery(
+                viewModel = viewModel,
                 modifier = Modifier.fillMaxSize()
-            ) {
-                items(history) { job ->
-                    GalleryThumbnailCard(
-                        job = job,
-                        onClick = { selectedJob = job }
-                    )
+            )
+        } else {
+            // Cloud / History Gallery
+            if (history.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("No generated images yet.", color = Color.Gray)
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 150.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(history) { job ->
+                        GalleryThumbnailCard(
+                            job = job,
+                            onClick = { selectedJob = job }
+                        )
+                    }
                 }
             }
         }

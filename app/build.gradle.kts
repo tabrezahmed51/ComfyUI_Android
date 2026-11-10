@@ -86,6 +86,14 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.kotlinx.coroutines.android)
 
+    // Retrofit & OkHttp Networking for ComfyUI API
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.gson)
+    implementation(libs.retrofit.converter.scalars)
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+    implementation(libs.gson)
+
     // Firebase & Auth
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.firestore)
