@@ -22,6 +22,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import com.example.comfyui.ui.auth.GoogleSignInButton
 import com.example.comfyui.ui.auth.UserAuthStatusCard
 import com.example.comfyui.ui.auth.signOutUser
@@ -38,6 +43,8 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
 
     val currentUrl by viewModel.serverUrl.collectAsState()
@@ -83,7 +90,11 @@ fun SettingsScreen(
             },
             navigationIcon = {
                 IconButton(
-                    onClick = onNavigateBack,
+                    onClick = {
+                        focusManager.clearFocus(force = true)
+                        keyboardController?.hide()
+                        onNavigateBack()
+                    },
                     modifier = Modifier.testTag("settings_back_button")
                 ) {
                     Icon(
@@ -329,6 +340,7 @@ fun SettingsScreen(
                                 }
                             }
                         },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -349,6 +361,8 @@ fun SettingsScreen(
                     ) {
                         SuggestionChip(
                             onClick = {
+                                focusManager.clearFocus(force = true)
+                                keyboardController?.hide()
                                 urlInput = "http://127.0.0.1:8188"
                                 saveFeedback = null
                             },
@@ -357,6 +371,8 @@ fun SettingsScreen(
                         )
                         SuggestionChip(
                             onClick = {
+                                focusManager.clearFocus(force = true)
+                                keyboardController?.hide()
                                 urlInput = "https://cloud.comfy.org"
                                 saveFeedback = null
                             },
@@ -365,6 +381,8 @@ fun SettingsScreen(
                         )
                         SuggestionChip(
                             onClick = {
+                                focusManager.clearFocus(force = true)
+                                keyboardController?.hide()
                                 urlInput = "http://10.0.2.2:8188"
                                 saveFeedback = null
                             },
@@ -373,6 +391,8 @@ fun SettingsScreen(
                         )
                         SuggestionChip(
                             onClick = {
+                                focusManager.clearFocus(force = true)
+                                keyboardController?.hide()
                                 urlInput = "http://192.168.1.100:8188"
                                 saveFeedback = null
                             },
@@ -405,6 +425,13 @@ fun SettingsScreen(
                                 )
                             }
                         },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                focusManager.clearFocus(force = true)
+                                keyboardController?.hide()
+                            }
+                        ),
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -446,6 +473,8 @@ fun SettingsScreen(
                     ) {
                         Button(
                             onClick = {
+                                focusManager.clearFocus(force = true)
+                                keyboardController?.hide()
                                 viewModel.updateServerSettings(urlInput, apiKeyInput)
                                 saveFeedback = "Settings saved & synced with Retrofit client"
                                 Toast.makeText(context, "Settings saved successfully", Toast.LENGTH_SHORT).show()
@@ -462,6 +491,8 @@ fun SettingsScreen(
 
                         FilledTonalButton(
                             onClick = {
+                                focusManager.clearFocus(force = true)
+                                keyboardController?.hide()
                                 viewModel.updateServerSettings(urlInput, apiKeyInput)
                                 viewModel.checkServerHealth()
                             },

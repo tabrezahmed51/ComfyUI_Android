@@ -22,11 +22,24 @@ jobs:
         java-version: '21'
         cache: 'gradle'
 
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Cache Gradle Dependencies & Wrapper
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/libs.versions.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
     - name: Verify Gradle wrapper and grant execute permissions
       shell: bash
       run: |
         if [ ! -f "./gradlew" ]; then
-          echo "WARNING: ./gradlew not found in project root. Generating..."
+          echo "WARNING: ./gradlew not found in project root. Generating wrapper..."
           gradle wrapper --gradle-version 9.3.1 || true
         fi
         if [ -f "./gradlew" ]; then
@@ -37,7 +50,7 @@ jobs:
           exit 1
         fi
 
-    - name: Prepare CI Build Environment
+    - name: Prepare CI Build Environment & Secrets
       shell: bash
       env:
         SECRET_GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
@@ -45,25 +58,25 @@ jobs:
         SECRET_COMFY_URL: ${{ secrets.COMFYUI_SERVER_URL }}
         SECRET_COMFY_KEY: ${{ secrets.COMFY_UI_SERVER_KEY }}
       run: |
-        echo "=== Preparing CI Environment ==="
+        echo "=== Setting up CI environment & build secrets ==="
 
-        # 1. Prepare debug.keystore
+        # 1. Prepare debug.keystore (from repository secret or generate via keytool)
         if [ -n "$SECRET_KEYSTORE_BASE64" ]; then
           echo "Injecting debug.keystore from repository secret..."
           echo "$SECRET_KEYSTORE_BASE64" | base64 -d > debug.keystore
         elif [ ! -f "debug.keystore" ]; then
-          echo "Generating automated CI debug.keystore via keytool..."
+          echo "Generating CI debug.keystore with standard credentials..."
           keytool -genkey -v -keystore debug.keystore -storepass android \
             -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
             -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
         fi
 
-        # 2. Prepare app/google-services.json
+        # 2. Prepare app/google-services.json (from repository secret or full client definition)
         if [ -n "$SECRET_GOOGLE_SERVICES_JSON" ]; then
           echo "Injecting google-services.json from repository secret..."
           echo "$SECRET_GOOGLE_SERVICES_JSON" > app/google-services.json
         elif [ ! -f "app/google-services.json" ]; then
-          echo "Generating valid CI placeholder google-services.json..."
+          echo "Generating complete CI google-services.json with web client ID..."
           cat << 'EOF' > app/google-services.json
         {
           "project_info": {
@@ -79,10 +92,23 @@ jobs:
                   "package_name": "com.aistudio.comfyui.nxqyzw"
                 }
               },
-              "oauth_client": [],
+              "oauth_client": [
+                {
+                  "client_id": "980026247024-nj7pghbqu12v6qlmfv79p1e1r6jr9td2.apps.googleusercontent.com",
+                  "client_type": 1,
+                  "android_info": {
+                    "package_name": "com.aistudio.comfyui.nxqyzw",
+                    "certificate_hash": "a480b2687d055fd1b02dfabb1cdd9a2682fb0a0e"
+                  }
+                },
+                {
+                  "client_id": "980026247024-vu1r4iqk0k0ced0nont4cd7ii5glh30d.apps.googleusercontent.com",
+                  "client_type": 3
+                }
+              ],
               "api_key": [
                 {
-                  "current_key": "ci-dummy-key"
+                  "current_key": "AIzaSyCBZAijJHuD8H-U0YQaywzm8_rtDAYa-IY"
                 }
               ],
               "services": {}
@@ -105,11 +131,11 @@ jobs:
           fi
         fi
 
-        echo "Environment successfully prepared."
+        echo "Environment successfully configured."
 
     - name: Run Unit Tests
       shell: bash
-      run: ./gradlew :app:testDebugUnitTest --no-daemon
+      run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
     - name: Upload Test Report
       if: always()
@@ -121,7 +147,7 @@ jobs:
 
     - name: Build Debug APK
       shell: bash
-      run: ./gradlew :app:assembleDebug --no-daemon
+      run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4

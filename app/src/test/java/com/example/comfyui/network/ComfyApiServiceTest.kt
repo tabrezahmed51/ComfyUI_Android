@@ -171,4 +171,54 @@ class ComfyApiServiceTest {
         val jobObj = root?.getAsJsonObject("job_42")
         assertTrue(jobObj?.has("outputs") == true)
     }
+
+    @Test
+    fun queuePrompt_errorHandlingReturnsUnsuccessfulResponse() = runBlocking {
+        val errorJson = """
+            {
+              "error": "Validation error: Node 3 has unconnected inputs",
+              "node_errors": {"3": {"errors": ["Missing input 'clip'"]}}
+            }
+        """.trimIndent()
+
+        mockWebServer.enqueue(MockResponse().setResponseCode(400).setBody(errorJson))
+
+        val body = "{\"prompt\":{}}".toRequestBody("application/json".toMediaType())
+        val response = apiService.queuePrompt(body)
+
+        assertFalse(response.isSuccessful)
+        assertEquals(400, response.code())
+        val errorBody = response.errorBody()?.string()
+        assertNotNull(errorBody)
+        assertTrue(errorBody?.contains("Validation error") == true)
+    }
+
+    @Test
+    fun getSystemStats_serverErrorReturns500Response() = runBlocking {
+        mockWebServer.enqueue(MockResponse().setResponseCode(500).setBody("Internal Server Error"))
+
+        val response = apiService.getSystemStats()
+
+        assertFalse(response.isSuccessful)
+        assertEquals(500, response.code())
+    }
+
+    @Test
+    fun viewImage_streamsResponseBodySuccessfully() = runBlocking {
+        val dummyPngBytes = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "image/png")
+                .setBody(okio.Buffer().write(dummyPngBytes))
+        )
+
+        val response = apiService.viewImage(filename = "test_image.png")
+
+        assertTrue(response.isSuccessful)
+        val bytes = response.body()?.bytes()
+        assertNotNull(bytes)
+        assertEquals(8, bytes?.size)
+        assertEquals(0x89.toByte(), bytes?.get(0))
+    }
 }

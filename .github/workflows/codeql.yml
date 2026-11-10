@@ -33,6 +33,9 @@ jobs:
         java-version: '21'
         cache: 'gradle'
 
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3
       with:
@@ -77,7 +80,7 @@ jobs:
           echo "Injecting google-services.json from repository secret..."
           echo "$SECRET_GOOGLE_SERVICES_JSON" > app/google-services.json
         elif [ ! -f "app/google-services.json" ]; then
-          echo "Generating CI placeholder google-services.json..."
+          echo "Generating CI placeholder google-services.json with web client ID..."
           cat << 'EOF' > app/google-services.json
         {
           "project_info": {
@@ -93,10 +96,23 @@ jobs:
                   "package_name": "com.aistudio.comfyui.nxqyzw"
                 }
               },
-              "oauth_client": [],
+              "oauth_client": [
+                {
+                  "client_id": "980026247024-nj7pghbqu12v6qlmfv79p1e1r6jr9td2.apps.googleusercontent.com",
+                  "client_type": 1,
+                  "android_info": {
+                    "package_name": "com.aistudio.comfyui.nxqyzw",
+                    "certificate_hash": "a480b2687d055fd1b02dfabb1cdd9a2682fb0a0e"
+                  }
+                },
+                {
+                  "client_id": "980026247024-vu1r4iqk0k0ced0nont4cd7ii5glh30d.apps.googleusercontent.com",
+                  "client_type": 3
+                }
+              ],
               "api_key": [
                 {
-                  "current_key": "ci-dummy-key"
+                  "current_key": "dummy-ci-key"
                 }
               ],
               "services": {}

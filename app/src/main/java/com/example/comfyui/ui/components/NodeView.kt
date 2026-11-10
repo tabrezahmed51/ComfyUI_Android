@@ -19,6 +19,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -60,6 +65,8 @@ fun NodeView(
 ) {
     var showInfoBubble by remember { mutableStateOf(false) }
     var showPortraitPreview by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     val borderColor = when {
         isCurrentExecuting -> PrimaryNeon
@@ -214,6 +221,13 @@ fun NodeView(
                                 .testTag("prompt_input_${node.id}"),
                             placeholder = { Text("Prompt description...", fontSize = 10.sp, color = Color.Gray) },
                             textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 10.sp),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    focusManager.clearFocus(force = true)
+                                    keyboardController?.hide()
+                                }
+                            ),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = PrimaryNeon,
                                 unfocusedBorderColor = BorderDark,

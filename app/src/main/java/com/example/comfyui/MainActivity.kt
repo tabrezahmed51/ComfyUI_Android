@@ -14,6 +14,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -47,9 +49,21 @@ class MainActivity : ComponentActivity() {
                 val queue by viewModel.queue.collectAsState()
                 val activeJob by viewModel.activeJob.collectAsState()
 
+                val focusManager = LocalFocusManager.current
+                val keyboardController = LocalSoftwareKeyboardController.current
+
+                // Dismiss any floating action mode or keyboard before navigating
+                val navigateTo: (ComfyScreen) -> Unit = { targetScreen ->
+                    if (currentScreen != targetScreen) {
+                        focusManager.clearFocus(force = true)
+                        keyboardController?.hide()
+                        currentScreen = targetScreen
+                    }
+                }
+
                 // Support hardware and gesture back navigation to Studio
                 BackHandler(enabled = currentScreen != ComfyScreen.STUDIO) {
-                    currentScreen = ComfyScreen.STUDIO
+                    navigateTo(ComfyScreen.STUDIO)
                 }
 
                 Scaffold(
@@ -68,7 +82,7 @@ class MainActivity : ComponentActivity() {
 
                                 NavigationBarItem(
                                     selected = isSelected,
-                                    onClick = { currentScreen = screen },
+                                    onClick = { navigateTo(screen) },
                                     icon = {
                                         BadgedBox(
                                             badge = {
@@ -104,24 +118,24 @@ class MainActivity : ComponentActivity() {
                         when (currentScreen) {
                             ComfyScreen.STUDIO -> StudioScreen(
                                 viewModel = viewModel,
-                                onNavigateToSettings = { currentScreen = ComfyScreen.SETTINGS }
+                                onNavigateToSettings = { navigateTo(ComfyScreen.SETTINGS) }
                             )
                             ComfyScreen.BLUEPRINTS -> BlueprintsScreen(
                                 viewModel = viewModel,
-                                onNavigateToStudio = { currentScreen = ComfyScreen.STUDIO }
+                                onNavigateToStudio = { navigateTo(ComfyScreen.STUDIO) }
                             )
                             ComfyScreen.QUEUE -> QueueScreen(viewModel = viewModel)
                             ComfyScreen.GALLERY -> GalleryScreen(
                                 viewModel = viewModel,
-                                onNavigateToStudio = { currentScreen = ComfyScreen.STUDIO }
+                                onNavigateToStudio = { navigateTo(ComfyScreen.STUDIO) }
                             )
                             ComfyScreen.MODELS -> ModelsScreen(
                                 viewModel = viewModel,
-                                onNavigateToSettings = { currentScreen = ComfyScreen.SETTINGS }
+                                onNavigateToSettings = { navigateTo(ComfyScreen.SETTINGS) }
                             )
                             ComfyScreen.SETTINGS -> SettingsScreen(
                                 viewModel = viewModel,
-                                onNavigateBack = { currentScreen = ComfyScreen.STUDIO }
+                                onNavigateBack = { navigateTo(ComfyScreen.STUDIO) }
                             )
                         }
                     }
