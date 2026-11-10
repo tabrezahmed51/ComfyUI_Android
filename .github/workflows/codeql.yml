@@ -4,11 +4,12 @@
 # You may wish to alter this file to override the set of languages analyzed,
 # or to provide custom queries or build logic.
 #
-# ******** NOTE ********
+# ********** NOTE **********
 # We have attempted to detect the languages in your repository. Please check
 # the `language` matrix defined below to confirm you have the correct set of
 # supported CodeQL languages.
 #
+
 name: "CodeQL Advanced"
 
 on:
@@ -42,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
@@ -63,9 +64,16 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Generate mock google-services.json
+        if: matrix.language == 'java-kotlin'
+        run: |
+          mkdir -p app
+          echo '{"project_info":{"project_number":"123456789012","project_id":"mock-project","storage_bucket":"mock-project.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:123456789012:android:123456789012","android_client_info":{"package_name":"com.tabrezahmed.comfyui"}},"oauth_client":[],"api_key":[{"current_key":"mock_key"}],"services":{"analytics_service":{"status":1}}}],"configuration_version":"1"}' > app/google-services.json
+
       - name: Build Android app for CodeQL
         if: matrix.language == 'java-kotlin'
         run: gradle :app:assembleDebug --no-daemon
+
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
