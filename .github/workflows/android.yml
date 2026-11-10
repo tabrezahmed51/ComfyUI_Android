@@ -7,8 +7,8 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  build:
-    name: Build Android APK
+  build-and-test:
+    name: Build & Test Android App
     runs-on: ubuntu-latest
 
     steps:
@@ -37,7 +37,89 @@ jobs:
           exit 1
         fi
 
-    - name: Build with Gradle
+    - name: Prepare CI Build Environment
+      shell: bash
+      env:
+        SECRET_GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        SECRET_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        SECRET_COMFY_URL: ${{ secrets.COMFYUI_SERVER_URL }}
+        SECRET_COMFY_KEY: ${{ secrets.COMFY_UI_SERVER_KEY }}
+      run: |
+        echo "=== Preparing CI Environment ==="
+
+        # 1. Prepare debug.keystore
+        if [ -n "$SECRET_KEYSTORE_BASE64" ]; then
+          echo "Injecting debug.keystore from repository secret..."
+          echo "$SECRET_KEYSTORE_BASE64" | base64 -d > debug.keystore
+        elif [ ! -f "debug.keystore" ]; then
+          echo "Generating automated CI debug.keystore via keytool..."
+          keytool -genkey -v -keystore debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+        fi
+
+        # 2. Prepare app/google-services.json
+        if [ -n "$SECRET_GOOGLE_SERVICES_JSON" ]; then
+          echo "Injecting google-services.json from repository secret..."
+          echo "$SECRET_GOOGLE_SERVICES_JSON" > app/google-services.json
+        elif [ ! -f "app/google-services.json" ]; then
+          echo "Generating valid CI placeholder google-services.json..."
+          cat << 'EOF' > app/google-services.json
+        {
+          "project_info": {
+            "project_number": "980026247024",
+            "project_id": "gen-lang-client-0990762902",
+            "storage_bucket": "gen-lang-client-0990762902.firebasestorage.app"
+          },
+          "client": [
+            {
+              "client_info": {
+                "mobilesdk_app_id": "1:980026247024:android:9a80884b4487911c2171b5",
+                "android_client_info": {
+                  "package_name": "com.aistudio.comfyui.nxqyzw"
+                }
+              },
+              "oauth_client": [],
+              "api_key": [
+                {
+                  "current_key": "ci-dummy-key"
+                }
+              ],
+              "services": {}
+            }
+          ],
+          "configuration_version": "1"
+        }
+        EOF
+        fi
+
+        # 3. Prepare .env configuration
+        if [ ! -f ".env" ]; then
+          echo "Generating .env from defaults or secrets..."
+          cp .env.example .env 2>/dev/null || touch .env
+          if [ -n "$SECRET_COMFY_URL" ]; then
+            echo "COMFYUI_SERVER_URL=$SECRET_COMFY_URL" >> .env
+          fi
+          if [ -n "$SECRET_COMFY_KEY" ]; then
+            echo "COMFY_UI_SERVER_KEY=$SECRET_COMFY_KEY" >> .env
+          fi
+        fi
+
+        echo "Environment successfully prepared."
+
+    - name: Run Unit Tests
+      shell: bash
+      run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+    - name: Upload Test Report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-test-results
+        path: app/build/reports/tests/testDebugUnitTest/
+        if-no-files-found: ignore
+
+    - name: Build Debug APK
       shell: bash
       run: ./gradlew :app:assembleDebug --no-daemon
 

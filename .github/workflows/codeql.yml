@@ -47,7 +47,6 @@ jobs:
           gradle wrapper --gradle-version 9.3.1 || true
         fi
         if [ -f "./gradlew" ]; then
-          echo "Granting executable permissions to ./gradlew..."
           chmod +x ./gradlew
           ls -la ./gradlew
         else
@@ -55,12 +54,70 @@ jobs:
           exit 1
         fi
 
+    - name: Prepare CI Build Environment
+      shell: bash
+      env:
+        SECRET_GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        SECRET_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+      run: |
+        echo "Configuring CI prerequisites for CodeQL..."
+        # 1. Prepare debug.keystore
+        if [ -n "$SECRET_KEYSTORE_BASE64" ]; then
+          echo "Injecting debug.keystore from repository secret..."
+          echo "$SECRET_KEYSTORE_BASE64" | base64 -d > debug.keystore
+        elif [ ! -f "debug.keystore" ]; then
+          echo "Generating CI debug.keystore..."
+          keytool -genkey -v -keystore debug.keystore -storepass android \
+            -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 \
+            -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+        fi
+
+        # 2. Prepare app/google-services.json
+        if [ -n "$SECRET_GOOGLE_SERVICES_JSON" ]; then
+          echo "Injecting google-services.json from repository secret..."
+          echo "$SECRET_GOOGLE_SERVICES_JSON" > app/google-services.json
+        elif [ ! -f "app/google-services.json" ]; then
+          echo "Generating CI placeholder google-services.json..."
+          cat << 'EOF' > app/google-services.json
+        {
+          "project_info": {
+            "project_number": "980026247024",
+            "project_id": "gen-lang-client-0990762902",
+            "storage_bucket": "gen-lang-client-0990762902.firebasestorage.app"
+          },
+          "client": [
+            {
+              "client_info": {
+                "mobilesdk_app_id": "1:980026247024:android:9a80884b4487911c2171b5",
+                "android_client_info": {
+                  "package_name": "com.aistudio.comfyui.nxqyzw"
+                }
+              },
+              "oauth_client": [],
+              "api_key": [
+                {
+                  "current_key": "ci-dummy-key"
+                }
+              ],
+              "services": {}
+            }
+          ],
+          "configuration_version": "1"
+        }
+        EOF
+        fi
+
+        # 3. Create .env from .env.example if missing
+        if [ ! -f ".env" ]; then
+          cp .env.example .env 2>/dev/null || touch .env
+        fi
+
     - name: Build Android app for CodeQL
       if: matrix.language == 'java-kotlin'
       shell: bash
       run: |
-        echo "Building Android app using root wrapper..."
-        ./gradlew :app:assembleDebug --no-daemon --stacktrace
+        echo "Building Android app for CodeQL analysis..."
+        ./gradlew :app:assembleDebug --no-daemon
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
