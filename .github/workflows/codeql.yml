@@ -42,39 +42,39 @@ jobs:
             build-mode: none
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
-        with:
-          languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build-mode }}
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v4
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
 
-      - name: Set up Java 21
-        if: matrix.language == 'java-kotlin'
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
+    - name: Set up Java 21
+      if: matrix.language == 'java-kotlin'
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: '21'
 
-      - name: Set up Gradle 9.3.1
-        if: matrix.language == 'java-kotlin'
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
+    - name: Set up Gradle 9.3.1
+      if: matrix.language == 'java-kotlin'
+      uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: '9.3.1'
 
-      - name: Generate mock google-services.json
-        if: matrix.language == 'java-kotlin'
-        run: |
-          mkdir -p app
-          echo '{"project_info":{"project_number":"123456789012","project_id":"mock-project","storage_bucket":"mock-project.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:123456789012:android:123456789012","android_client_info":{"package_name":"com.tabrezahmed.comfyui"}},"oauth_client":[],"api_key":[{"current_key":"mock_key"}],"services":{"analytics_service":{"status":1}}}],"configuration_version":"1"}' > app/google-services.json
+    - name: Generate mock google-services.json
+      if: matrix.language == 'java-kotlin'
+      run: |
+        mkdir -p app
+        echo '{"project_info":{"project_number":"123456789012","project_id":"mock-project","storage_bucket":"mock-project.appspot.com"},"client":[{"client_info":{"mobilesdk_app_id":"1:123456789012:android:123456789012","android_client_info":{"package_name":"com.aistudio.comfyui.nxqyzw"}},"oauth_client":[],"api_key":[{"current_key":"mock_key"}],"services":{"analytics_service":{"status":1}}}]}' > app/google-services.json
 
-      - name: Build Android app for CodeQL
-        if: matrix.language == 'java-kotlin'
-        run: gradle :app:assembleDebug --no-daemon
+    - name: Build Android app for CodeQL
+      if: matrix.language == 'java-kotlin'
+      run: gradle :app:assembleDebug --no-daemon
 
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
-        with:
-          category: "/language:${{matrix.language}}"
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v4
+      with:
+        category: "/language:${{matrix.language}}"
